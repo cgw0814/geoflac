@@ -12,7 +12,8 @@ integer :: jj, j, i, iph, &
            jbelow, k, kinc, kk, n
 double precision :: yy, dep2, depth, press, quad_area, &
                     tmpr, trtmpr, trpres, trpres2, &
-                    solidus, pmelt
+                    solidus, pmelt, trpresmg, trpresgb, &
+                    trpresmb!, trpresba, trpresbe
 
 ! max. depth (m) of eclogite phase transition, no serpentinization below it
 real*8, parameter :: max_basalt_depth = 150.d3
@@ -149,17 +150,32 @@ do kk = 1 , nmarkers
         itmp(j,i) = 1
         mark_phase(kk) = kmetased
     case (kmetased)
-        ! dehydration, sedimentary rock -> schist
-        ! from metapelite KFMASH petrogenic grid,
-        ! invariant points i5 (710.8 C, 0.880 GPa) i3 (662.3 C, 0.704 GPa)
-        ! Fig 1, Wei, Powell, Clarke, J. Metamorph. Geol., 2004.
-        trpres = 0.88d9 - (0.88d9 - 0.704d9) * (710.8d0 - tmpr) / (710.8d0 - 662.3d0)
+        ! dehydration, sedimentary rock -> greenschist
+        ! two points constrain line fuction: trpresg (244.4 C, 0 GPa), (293.6 C, 4.5 GPa)
+        ! sedimentary rock -> blueschist
+        ! two points constrain line fuction: trpresb (0 C, 3.8 GPa), (293.6 C, 4.5 GPa)
+        ! Fig 2, Takasu, 1989, Geological Society Special Publication.
+        ! greenschist domain
+        trpresmg = 9.1d6 * tmpr - 2.2d9 ! metasediment | greenschist
+        trpresgb = 7.2d5 * tmpr + 2.4d8 ! greenschist | blueschist
+        ! blueschist domain
+        trpresmb = 2.6d5 * tmpr + 3.7d8 ! metasediment | blueschist
+        ! trpresba = 8.3d6 * tmpr - 2.9d9 ! blueschist | amphibolite
+        ! trpresbe = 7.9d9 - 1.3d7 * tmpr ! blueschist | eclogite
         press = mantle_density * g * depth
-        if (press < trpres ) cycle
-        !$ACC atomic write
-        !$OMP atomic write
-        itmp(j,i) = 1
-        mark_phase(kk) = kschist
+        if (press < trpresmg .and. press < trpresgb ) then
+            !$ACC atomic write
+            !$OMP atomic write
+            itmp(j,i) = 1
+            mark_phase(kk) = kschist
+        elseif (press > trpresmb .and. press > trpresgb) then
+            !$ACC atomic write
+            !$OMP atomic write
+            itmp(j,i) = 1
+            mark_phase(kk) = kbschist
+        else
+            cycle
+        endif
     case (khydmant)
         ! dehydration of chlorite
         ! Phase diagram from Grove et al. Nature, 2009
