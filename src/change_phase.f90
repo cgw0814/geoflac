@@ -14,7 +14,7 @@ double precision :: yy, dep2, depth, press, quad_area, &
                     tmpr, trtmpr, trpres, trpres2, &
                     solidus, pmelt, trpresmg, trpresgb, &
                     trpresmb, trpresba, trpresbe, trpresae, &
-                    trpreseg
+                    trpreseg, trpresga1, trpresga2, trpresag
 
 ! max. depth (m) of eclogite phase transition, no serpentinization below it
 real*8, parameter :: max_basalt_depth = 150.d3
@@ -30,7 +30,9 @@ real*8, parameter :: serpentine_temp = 550.d0
 itmp = 0  ! indicates which element has phase-changed markers
 !$ACC end kernels
 
-!$OMP parallel private(kk,i,j,k,n,tmpr,depth,iph,press,jbelow,trpres,trpres2,kinc,quad_area,yy)
+!$OMP parallel private(kk,i,j,k,n,tmpr,depth,iph,press,jbelow,trpres, &
+!$OMP        trpres2,kinc,quad_area,yy,trpresmg,trpresgb,trpresmb,trpresba,&
+!$OMP        trpresbe,trpresae,trpreseg,trpresga1,trpresga2,trpresag)
 !$OMP do schedule(guided)
 !$ACC parallel loop async(1)
 do kk = 1 , nmarkers
@@ -177,26 +179,79 @@ do kk = 1 , nmarkers
         else
             cycle
         endif
-    case (kbschist)
+    case (kschist)
+        ! metasediment domain
         trpresmg = 9.1d6 * tmpr - 2.2d9 ! metasediment | greenschist
+        trpresmb = 2.6d5 * tmpr + 3.7d8 ! metasediment | blueschist
+        ! amphibolite domain
+        trpresga1 = 1.3d7 * tmpr - 5.6d9 ! greenschist | amphibolite
+        trpresga2 = 3.8d9 - 7.8d6 * tmpr ! greenschist | amphibolite
+        trpresba = 8.3d6 * tmpr - 2.9d9 ! blueschist | amphibolite
+        trpresae = 2.4d9 - 2.2d6 * tmpr ! amphibolite | eclogite
+        trpresag = 6.8d6 * tmpr - 3.8d9 ! amphibolite | granulite
+        ! blueschist domain
         trpresmb = 2.6d5 * tmpr + 3.7d8 ! metasediment | blueschist
         trpresgb = 7.2d5 * tmpr + 2.4d8 ! greenschist | blueschist
         trpresba = 8.3d6 * tmpr - 2.9d9 ! blueschist | amphibolite
         trpresbe = 7.9d9 - 1.3d7 * tmpr ! blueschist | eclogite
+        press = mantle_density * g * depth
+        if (press < trpresmb .and. press > trpresmg) then
+            !$ACC atomic write
+            !$OMP atomic write
+            itmp(j,i) = 1
+            mark_phase(kk) = kmetased
+        elseif (press < trpresga1 .and. press > trpresga2 .and. press < trpresba .and. press < trpresae .and. press > trpresag) then
+            !$ACC atomic write
+            !$OMP atomic write
+            itmp(j,i) = 1
+            mark_phase(kk) = kamph
+        elseif (press > trpresmb .and. press > trpresgb .and. press > trpresba .and. press < trpresbe) then
+            !$ACC atomic write
+            !$OMP atomic write
+            itmp(j,i) = 1
+            mark_phase(kk) = kbschist
+        else
+            cycle
+        endif
+    case (kbschist)
+        ! metasediment domain
+        trpresmg = 9.1d6 * tmpr - 2.2d9 ! metasediment | greenschist
+        trpresmb = 2.6d5 * tmpr + 3.7d8 ! metasediment | blueschist
+        ! greenschist domain
+        trpresgb = 7.2d5 * tmpr + 2.4d8 ! greenschist | blueschist
+        ! amphibolite domain
+        trpresga1 = 1.3d7 * tmpr - 5.6d9 ! greenschist | amphibolite
+        trpresga2 = 3.8d9 - 7.8d6 * tmpr ! greenschist | amphibolite
+        trpresba = 8.3d6 * tmpr - 2.9d9 ! blueschist | amphibolite
+        trpresae = 2.4d9 - 2.2d6 * tmpr ! amphibolite | eclogite
+        trpresag = 6.8d6 * tmpr - 3.8d9 ! amphibolite | granulite
+        ! eclogite domain
         trpresae = 2.4d9 - 2.2d6 * tmpr ! amphibolite | eclogite
         trpreseg = 2.3d6 * tmpr - 7.5d8 ! eclogite | granulite
+        trpresbe = 7.9d9 - 1.3d7 * tmpr ! blueschist | eclogite
+
         press = mantle_density * g * depth
-        ! blueschists to greenschist and eclogite
-        if (press > trpresbe .and. press > trpresae .and. press > trpreseg) then
+        ! blueschists to metasediment, greenschist, amphibolite and eclogite
+        if (press < trpresmb .and. press > trpresmg) then
             !$ACC atomic write
             !$OMP atomic write
             itmp(j,i) = 1
-            mark_phase(kk) = keclg
-        else if (press <= trpresmg .and. press <= trpresgb) then
+            mark_phase(kk) = kmetased
+        elseif (press < trpresmg .and. press < trpresgb .and. press > trpresga1 .and. press < trpresga2) then
             !$ACC atomic write
             !$OMP atomic write
             itmp(j,i) = 1
-            mark_phase(kk) = kschist            
+            mark_phase(kk) = kschist
+        elseif (press < trpresga1 .and. press > trpresga2 .and. press < trpresba .and. press < trpresae .and. press > trpresag) then
+            !$ACC atomic write
+            !$OMP atomic write
+            itmp(j,i) = 1
+            mark_phase(kk) = kamph
+        elseif (press > trpresbe .and. press > trpresae .and. press > trpreseg) then
+            !$ACC atomic write
+            !$OMP atomic write
+            itmp(j,i) = 1
+            mark_phase(kk) = keclg            
         else
             cycle
         endif
